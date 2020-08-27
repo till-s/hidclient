@@ -502,14 +502,7 @@ int	initfifo ( char *filename )
 
 int inittty(const char *name)
 {
-int i;
 struct termios rawttysettings;
-
-	for ( i = 0; i < MAXEVDEVS; ++i )
-	{
-		eventdevs[i] = -1;
-		x11handles[i] = -1;
-	}
 
 	if ( (eventdevs[TTY_FD_IDX] = open( name, O_RDONLY )) < 0 )
 	{
@@ -575,11 +568,6 @@ int	initevents ( unsigned int evdevmask, int mutex11 )
 			}
 		}
 		fclose ( pf );
-	}
-	for ( i = 0; i < MAXEVDEVS; ++i )
-	{
-		eventdevs[i] = -1;
-		x11handles[i] = -1;
 	}
 	for ( i = j = 0; j < MAXEVDEVS; ++j )
 	{
@@ -1425,6 +1413,16 @@ int	parse_events ( fd_set * efds, int sockdesc )
 	return	0;
 }
 
+static void
+drop0()
+{
+	if ( setuid( getuid() && 0 == geteuid() ) )
+	{
+		perror("Unable to drop root priviles");
+		exit(1);
+	}
+}
+
 int	main ( int argc, char ** argv )
 {
 	int         opt;
@@ -1448,28 +1446,56 @@ int	main ( int argc, char ** argv )
 	int              rval   = 1;
 	// Parse command line
 
+	for ( j = 0; j < MAXEVDEVS; ++j )
+	{
+		eventdevs[j]  = -1;
+		x11handles[j] = -1;
+	}
+
 	while ( (opt = getopt(argc, argv, "h?se:ldxtf:")) > 0 ) {
 		switch ( opt ) {
 			case 'h':
-			case '?': showhelp();                              return 0;
+			case '?': drop0(); showhelp();                     return 0;
 			case 's': skipsdp = 1;                             break;
 			case 'e': evdevmask |= 1 << atoi(optarg);          break;
-			case 'l': return list_input_devices();
+			case 'l': drop0(); return list_input_devices();
 			case 'd': debugevents = 0xffff;                    break;
 			case 'x': mutex11     = 1;                         break;
 			case 't': usetty      = 1;                         break;
             case 'f': fifoname    = optarg;                    break;
             default:
+				drop0();
 				fprintf ( stderr, "Invalid option: \'-%c\'\n", opt );
 			return	1;
 		}
 	}
+
+	sockint = socket ( AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP );
+	sockctl = socket ( AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP );
+	if ( ( 0 > sockint ) || ( 0 > sockctl ) )
+	{
+		fprintf ( stderr, "Failed to generate bluetooth sockets\n" );
+		rval = 2;
+		goto cleanup;
+	}
+	if ( btbind ( sockint, PSMHIDINT ) || btbind ( sockctl, PSMHIDCTL ))
+	{
+		fprintf ( stderr, "Failed to bind sockets (%d/%d) "
+				"to PSM (%d/%d)\n",
+				sockctl, sockint, PSMHIDCTL, PSMHIDINT );
+		rval = 3;
+		goto cleanup;
+	}
+
+	drop0();
+
 	if ( ! skipsdp )
 	{
 		if ( dosdpregistration() )
 		{
 			fprintf(stderr,"Failed to register with SDP server\n");
-			return	1;
+			rval = 1;
+			goto cleanup;
 		}
 	}
 	if ( usetty )
@@ -1487,7 +1513,8 @@ int	main ( int argc, char ** argv )
 		if ( 1 > inittty(ttyname) )
 		{
 			fprintf(stderr, "Failed to open TTY interface file\n");
-			return 2;
+			rval = 2;
+			goto cleanup;
 		}
 	}
 	else if ( NULL == fifoname )
@@ -1495,7 +1522,8 @@ int	main ( int argc, char ** argv )
 		if ( 1 > initevents (evdevmask, mutex11) )
 		{
 			fprintf ( stderr, "Failed to open event interface files\n" );
-			return	2;
+			rval = 2;
+			goto cleanup;
 		}
 	}
 	else
@@ -1503,7 +1531,8 @@ int	main ( int argc, char ** argv )
 		if ( 1 > initfifo ( fifoname ) )
 		{
 			fprintf ( stderr, "Failed to create/open fifo [%s]\n", fifoname );
-			return	2;
+			rval = 2;
+			goto cleanup;
 		}
 	}
 	maxevdevfileno = add_filedescriptors ( &efds );
@@ -1511,22 +1540,6 @@ int	main ( int argc, char ** argv )
 	{
 		fprintf ( stderr, "Failed to organize event input.\n" );
 		rval = 13;
-		goto cleanup;
-	}
-	sockint = socket ( AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP );
-	sockctl = socket ( AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP );
-	if ( ( 0 > sockint ) || ( 0 > sockctl ) )
-	{
-		fprintf ( stderr, "Failed to generate bluetooth sockets\n" );
-		rval = 2;
-		goto cleanup;
-	}
-	if ( btbind ( sockint, PSMHIDINT ) || btbind ( sockctl, PSMHIDCTL ))
-	{
-		fprintf ( stderr, "Failed to bind sockets (%d/%d) "
-				"to PSM (%d/%d)\n",
-				sockctl, sockint, PSMHIDCTL, PSMHIDINT );
-		rval = 3;
 		goto cleanup;
 	}
 	if ( listen ( sockint, 1 ) || listen ( sockctl, 1 ) )
