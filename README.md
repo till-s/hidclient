@@ -67,7 +67,16 @@ In a similar fashion basic ANSI escape sequences that are used by
 the termial (mostly for cursor movement) are mapped to the PS1 UP, DOWN,
 LEFT, RIGHT, HOME, END etc. keys.
 
-### Original README
+### Use of Dead Key
+If the target keyboard is set to 'International' then it should
+recognize `dead` keys which allow you to type accented characters.
+On my Android device, for example, the symbols `, ~ and ^ are
+recognized as dead keys and I can compose e.g., a `â` by typing
+the sequence ^, a. For some reason this does not work with , ' "
+but it does once I combine those latter ones with Alt_R.
+Thus, I can generate a 'ë' with the sequence Alt_R-Shift-', e.
+
+# Original README
 
 ## Current status
 
