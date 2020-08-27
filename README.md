@@ -6,7 +6,7 @@ Original software is GPL'ed, written by Anselm Martin Hoffmeister.
 
 ## Modifications Introduced by This Fork
 
-This fork adds support for taking keyboard-input (and keyboard-input only)
+This fork adds support for taking keyboard input (and keyboard input only)
 from the current TTY instead of the input/event devices. This means
 that there is no interoperability problem with X; no tweaks are necessary
 and it is trivial to use `hidclient` in a terminal window while using other

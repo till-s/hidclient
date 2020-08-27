@@ -890,7 +890,7 @@ static int mapAscii(struct hidrep_keyb_t *keyb, int ch)
 				if ( '0' == ch ) {
 					ch += 10;
 				}
-				keyb->key[sendkeys++] = ch - '0' + 0x1e;
+				keyb->key[sendkeys++] = ch - '1' + 0x1e;
 			} else if ( (mapItem = findAscii( ch )) )
 			{
 				keyb->key[sendkeys++] = mapItem->ps1;
@@ -939,11 +939,9 @@ int i;
 	if ( 0xC3 == buf[0] )
 	{
 		char uLow = buf[1] & ~0x20;
-printf("Checking C3 map for 0x%02x\n", uLow);
 		for ( i = 0; i < sizeof(utf8c3map)/sizeof(utf8c3map[0]); i++ ) {
 			if (utf8c3map[i].u == uLow) {
 				keyb->key[sendkeys++] = utf8c3map[i].ps1;
-printf("Mapped UTF8 0xC3 0x%02x -> 0x%02x\n", buf[1], utf8c3map[i].ps1);
 				if ( ! (buf[1] & 0x20) )
 				{
 					keyb->modify |= MOD_L_SHFT;
@@ -1052,7 +1050,7 @@ int                  sendkeys = 0;
 	{
 		for ( i = 0; i < nkeys; i++ )
 		{
-			printf(" 0x%02x (%c)", (unsigned char)buf[i], isprint(buf[i]) ? buf[i] : '*');
+			fprintf(stderr, " 0x%02x (%c)", (unsigned char)buf[i], isprint(buf[i]) ? buf[i] : '*');
 		}
 		printf("\r\n");
 	}
