@@ -166,7 +166,7 @@ void		sdpunregister(unsigned int);
 static void	add_lang_attr(sdp_record_t *r);
 int		btbind(int sockfd, unsigned short port);
 int		initevents(unsigned int,int);
-int		inittty(void);
+int		inittty(const char *);
 void		closeevents(void);
 void        closetty(void);
 int		initfifo(char *);
@@ -1195,7 +1195,7 @@ int	parse_events ( fd_set * efds, int sockdesc )
 int	main ( int argc, char ** argv )
 {
 	int			i,  j;
-	int			sockint, sockctl; // For the listening sockets
+	int			sockint = -1, sockctl = -1; // For the listening sockets
 	struct sockaddr_l2	l2a;
 	socklen_t		alen=sizeof(l2a);
 	int			sint,  sctl;	  // For the one-session-only
@@ -1211,6 +1211,7 @@ int	main ( int argc, char ** argv )
 	char			*fifoname = NULL; // Filename for fifo, if applicable
 	char            *ttyname  = TTYNAME;
 	int              usetty = 0; // whether to get input from /dev/tty instead of events
+	int              rval   = 1;
 	// Parse command line
 	for ( i = 1; i < argc; ++i )
 	{
@@ -1301,28 +1302,32 @@ int	main ( int argc, char ** argv )
 	if ( maxevdevfileno <= 0 )
 	{
 		fprintf ( stderr, "Failed to organize event input.\n" );
-		return	13;
+		rval = 13;
+		goto cleanup;
 	}
 	sockint = socket ( AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP );
 	sockctl = socket ( AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP );
 	if ( ( 0 > sockint ) || ( 0 > sockctl ) )
 	{
 		fprintf ( stderr, "Failed to generate bluetooth sockets\n" );
-		return	2;
+		rval = 2;
+		goto cleanup;
 	}
 	if ( btbind ( sockint, PSMHIDINT ) || btbind ( sockctl, PSMHIDCTL ))
 	{
 		fprintf ( stderr, "Failed to bind sockets (%d/%d) "
 				"to PSM (%d/%d)\n",
 				sockctl, sockint, PSMHIDCTL, PSMHIDINT );
-		return	3;
+		rval = 3;
+		goto cleanup;
 	}
 	if ( listen ( sockint, 1 ) || listen ( sockctl, 1 ) )
 	{
 		fprintf ( stderr, "Failed to listen on int/ctl BT socket\n" );
 		close ( sockint );
 		close ( sockctl );
-		return	4;
+		rval = 4;
+		goto cleanup;
 	}
 	// Add handlers to catch signals:
 	// All do the same, terminate the program safely
@@ -1366,7 +1371,8 @@ int	main ( int argc, char ** argv )
 			}
 			fprintf ( stderr, "select() error on BT socket: %s! "
 					"Aborting.\n", strerror ( errno ) );
-			return	11;
+			rval = 11;
+			goto cleanup;
 		}
 		if ( j == 0 )
 		{	// Nothing happened, check for shutdown req and retry
@@ -1399,7 +1405,8 @@ int	main ( int argc, char ** argv )
 			}
 			fprintf ( stderr, "select() error on BT socket: %s! "
 					"Aborting.\n", strerror ( errno ) );
-			return	12;
+			rval = 12;
+			goto cleanup;
 		}
 		if ( j == 0 )
 		{
@@ -1479,6 +1486,9 @@ int	main ( int argc, char ** argv )
 		usleep ( 500000 ); // Sleep 0.5 secs between connections
 				   // to not be flooded
 	}
+	rval = 0;
+
+cleanup:
 	//i = system ( "stty echo" );	   // Set console back to normal
 	close ( sockint );
 	close ( sockctl );
@@ -1500,7 +1510,7 @@ int	main ( int argc, char ** argv )
 	}
 	cleanup_stdin ();	   // And remove the input queue from stdin
 	fprintf ( stderr, "Stopped hidclient.\n" );
-	return	0;
+	return	rval;
 }
 
 
