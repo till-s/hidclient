@@ -102,7 +102,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <termios.h>
 #include <stropts.h>
+#include <ctype.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -121,9 +123,13 @@
 // Where to find event devices (that must be readable by current user)
 // "%d" to be filled in, opening several devices, see below
 #define	EVDEVNAME	"/dev/input/event%d"
+#define TTYNAME     "/dev/tty"
 
 // Maximally, read MAXEVDEVS event devices simultaneously
 #define	MAXEVDEVS 64
+
+// slot in the evdevs table we use when taking input from a TTY
+#define TTY_FD_IDX 0
 
 // Bluetooth "ports" (PSMs) for HID usage, standardized to be 17 and 19 resp.
 // In theory you could use different ports, but several implementations seem
@@ -160,12 +166,15 @@ void		sdpunregister(unsigned int);
 static void	add_lang_attr(sdp_record_t *r);
 int		btbind(int sockfd, unsigned short port);
 int		initevents(unsigned int,int);
+int		inittty(void);
 void		closeevents(void);
+void        closetty(void);
 int		initfifo(char *);
 void		closefifo(void);
 void		cleanup_stdin(void);
 int		add_filedescriptors(fd_set*);
 int		parse_events(fd_set*,int);
+int     parse_tty(fd_set*, int);
 void		showhelp(void);
 void		onsignal(int);
 
@@ -191,6 +200,7 @@ struct hidrep_keyb_t
 
 //***************** Global variables
 char		prepareshutdown	 = 0;	// Set if shutdown was requested
+struct termios origttysettings;
 int		eventdevs[MAXEVDEVS];	// file descriptors
 int		x11handles[MAXEVDEVS];
 char		mousebuttons	 = 0;	// storage for button status
@@ -476,6 +486,45 @@ int	initfifo ( char *filename )
 	return	1;
 }
 
+int inittty(const char *name)
+{
+int i;
+struct termios rawttysettings;
+
+	for ( i = 0; i < MAXEVDEVS; ++i )
+	{
+		eventdevs[i] = -1;
+		x11handles[i] = -1;
+	}
+
+	if ( (eventdevs[TTY_FD_IDX] = open( name, O_RDONLY | O_NDELAY )) < 0 )
+	{
+		buf[256];
+		snprintf(buf, sizeof(buf), "Opening %s failed", name);
+		perror(buf);
+		return 0;
+	}
+	if ( tcgetattr( eventdevs[TTY_FD_IDX], &origttysettings ) )
+	{
+		perror("Unable to retrieve TTY attributes");
+		close( eventdevs[TTY_FD_IDX] );
+		eventdevs[TTY_FD_IDX] = -1;
+		return 0;
+	}
+	rawttysettings = origttysettings;
+	cfmakeraw( &rawttysettings );
+	if ( tcsetattr( eventdevs[TTY_FD_IDX], TCSAFLUSH, &rawttysettings ) )
+	{
+		perror("Unable to set TTY to raw mode");
+		tcsetattr( eventdevs[TTY_FD_IDX], TCSAFLUSH, &origttysettings );
+		close( eventdevs[TTY_FD_IDX] );
+		eventdevs[TTY_FD_IDX] = -1;
+		return 0;
+	}
+	printf("Opened TTY\n");
+	return 1;
+}
+
 /*
  * 	initevents () - opens all required event files
  * 	or only the ones specified by evdevmask, if evdevmask != 0
@@ -590,6 +639,15 @@ void	closefifo ( void )
 	if ( eventdevs[0] >= 0 )
 		close(eventdevs[0]);
 	return;
+}
+
+void closetty( void )
+{
+	if ( eventdevs[TTY_FD_IDX] >= 0 )
+	{
+		tcsetattr( eventdevs[TTY_FD_IDX], TCSAFLUSH, &origttysettings );
+		close(eventdevs[TTY_FD_IDX]);
+	}
 }
 
 void	cleanup_stdin ( void )
@@ -710,6 +768,82 @@ int	list_input_devices ()
 	}
 	free ( xinlist );
 	return	0;
+}
+
+int parse_tty ( fd_set *efds, int sockdesc )
+{
+struct hidrep_keyb_t keyb;
+int                  j,i,nkeys;
+char                 buf[sizeof(keyb.key)];
+
+	if ( efds == NULL ) { return -1; }
+
+	keyb.btcode = 0xA1;
+	keyb.rep_id = REPORTID_KEYBD;
+	keyb.modify = 0;
+	memset( keyb.key, 0, sizeof(keyb.key) );
+
+	if ( ! FD_ISSET( eventdevs[TTY_FD_IDX], efds ) )
+	{
+		return 0;
+	}
+	nkeys = read( eventdevs[TTY_FD_IDX], buf, sizeof(buf) );
+
+	if ( nkeys <= 0 )
+	{
+		if ( 0 == nkeys )
+		{
+			if ( debugevents & 0x1 ) fprintf(stderr,".");
+			return 0;
+		}
+		else
+		{
+			if ( debugevents & 0x1 )
+			{
+				if ( errno > 0 )
+				{
+					fprintf(stderr,"%d|%d(%s) (expected at least %d bytes). ",eventdevs[TTY_FD_IDX],errno,strerror(errno), 1);
+				}
+				else
+				{
+					fprintf(stderr,"j=-1,errno<=0...");
+				}
+			}
+		}
+		return -1;
+	}
+
+	printf("TTY: got chars ");
+	for ( i = 0; i < nkeys; i++ )
+	{
+		printf("0x%02x (%c)", buf[i], isprint(buf[i]) ? buf[i] : '*');
+	}
+	printf("\n");
+
+	if ( sockdesc >= 0 )
+	{
+		for ( i = 0; i < nkeys; i++ ) {
+			keyb.key[i] = buf[i];
+		}
+		j = send ( sockdesc, &keyb, sizeof( keyb ), MSG_NOSIGNAL );
+
+		if ( 1 > j )
+		{
+			return	-1;
+		}
+
+		for ( i = 0; i < nkeys; i++ ) {
+			keyb.key[i] = 0;
+		}
+		j = send ( sockdesc, &keyb, sizeof( keyb ), MSG_NOSIGNAL );
+
+		if ( 1 > j )
+		{
+			return	-1;
+		}
+	}
+
+	return 0;
 }
 
 /*	parse_events - At least one filedescriptor can now be read
@@ -1075,6 +1209,8 @@ int	main ( int argc, char ** argv )
 	int			evdevmask = 0;// If restricted to using only one evdev
 	int			mutex11 = 0;      // try to "mute" in x11?
 	char			*fifoname = NULL; // Filename for fifo, if applicable
+	char            *ttyname  = TTYNAME;
+	int              usetty = 0; // whether to get input from /dev/tty instead of events
 	// Parse command line
 	for ( i = 1; i < argc; ++i )
 	{
@@ -1105,6 +1241,10 @@ int	main ( int argc, char ** argv )
 		{
 			mutex11 = 1;
 		}
+		else if ( 0 == strcmp ( argv[i], "-t" ) )
+		{
+			usetty = 1;
+		}
 		else if ( 0 == strncmp ( argv[i], "-f", 2 ) )
 		{
 			fifoname = argv[i] + 2;
@@ -1123,14 +1263,34 @@ int	main ( int argc, char ** argv )
 			return	1;
 		}
 	}
-	if ( NULL == fifoname )
+	if ( usetty )
+	{
+		if ( fifoname )
+		{
+			ttyname  = fifoname;
+			fifoname = 0;
+		}
+		if ( evdevmask )
+		{
+			fprintf(stderr,"Warning: input from eventdevs ignored when TTY enabled\n");
+			evdevmask = 0;
+		}
+		if ( 1 > inittty(ttyname) )
+		{
+			fprintf(stderr, "Failed to open TTY interface file\n");
+			return 2;
+		}
+	}
+	else if ( NULL == fifoname )
 	{
 		if ( 1 > initevents (evdevmask, mutex11) )
 		{
 			fprintf ( stderr, "Failed to open event interface files\n" );
 			return	2;
 		}
-	} else {
+	}
+	else
+	{
 		if ( 1 > initfifo ( fifoname ) )
 		{
 			fprintf ( stderr, "Failed to create/open fifo [%s]\n", fifoname );
@@ -1181,7 +1341,7 @@ int	main ( int argc, char ** argv )
 		tv.tv_usec = 0;
 		while ( 0 < (j = select(maxevdevfileno+1,&efds,NULL,NULL,&tv)))
 		{	// Collect and discard input data as long as available
-			if ( -1 >  ( j = parse_events ( &efds, 0 ) ) )
+			if ( -1 >  ( j = (usetty ? parse_tty( &efds, -1 ) : parse_events ( &efds, 0 ) ) ) )
 			{	// LCtrl-LAlt-PAUSE - terminate program
 				prepareshutdown = 1;
 				break;
@@ -1271,7 +1431,7 @@ int	main ( int argc, char ** argv )
 		{
 			// This loop removes all input garbage that might be
 			// already in the queue
-			if ( -1 > ( j = parse_events ( &efds, 0 ) ) )
+			if ( -1 >  ( j = (usetty ? parse_tty( &efds, -1 ) : parse_events ( &efds, 0 ) ) ) )
 			{	// LCtrl-LAlt-PAUSE - terminate program
 				prepareshutdown = 1;
 				break;
@@ -1294,7 +1454,7 @@ int	main ( int argc, char ** argv )
 			while ( 0 < ( j = select ( maxevdevfileno + 1, &efds,
 							NULL, NULL, &tv ) ) )
 			{
-				if ( 0 > ( j = parse_events ( &efds, sint ) ) )
+				if ( 0 >  ( j = (usetty ? parse_tty( &efds, sint ) : parse_events ( &efds, sint ) ) ) )
 				{
 					// PAUSE pressed - close connection
 					connectionok = 0;
@@ -1326,10 +1486,16 @@ int	main ( int argc, char ** argv )
 	{
 		sdpunregister ( sdphandle ); // Remove HID info from SDP server
 	}
-	if ( NULL == fifoname )
+	if ( usetty )
+	{
+		closetty();
+	}
+	else if ( NULL == fifoname )
 	{
 		closeevents ();
-	} else {
+	}
+	else
+	{
 		closefifo ();
 	}
 	cleanup_stdin ();	   // And remove the input queue from stdin
