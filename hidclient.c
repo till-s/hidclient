@@ -118,6 +118,10 @@
 #include <bluetooth/l2cap.h>
 #include <bluetooth/sdp.h>
 #include <bluetooth/sdp_lib.h>
+#include <getopt.h>
+#include <assert.h>
+
+#include <asciimap.h>
 
 //***************** Static definitions
 // Where to find event devices (that must be readable by current user)
@@ -159,6 +163,16 @@
 			"\x15\x00\x25\x65\x05\x07\x19\x00\x29\x65\x81\x00" \
 			"\xC0\xC0"
 #define SDPRECORD_BYTES	98
+
+#define MOD_L_CTRL (1<<0)
+#define MOD_L_SHFT (1<<1)
+#define MOD_L_ALT  (1<<2)
+#define MOD_L_CMD  (1<<3)
+#define MOD_R_CTRL (1<<4)
+#define MOD_R_SHFT (1<<5)
+#define MOD_R_ALT  (1<<6)
+#define MOD_R_CMD  (1<<7)
+
 
 //***************** Function prototypes
 int		dosdpregistration(void);
@@ -497,29 +511,34 @@ struct termios rawttysettings;
 		x11handles[i] = -1;
 	}
 
-	if ( (eventdevs[TTY_FD_IDX] = open( name, O_RDONLY | O_NDELAY )) < 0 )
+	if ( (eventdevs[TTY_FD_IDX] = open( name, O_RDONLY )) < 0 )
 	{
-		buf[256];
+		char buf[256];
 		snprintf(buf, sizeof(buf), "Opening %s failed", name);
 		perror(buf);
 		return 0;
 	}
-	if ( tcgetattr( eventdevs[TTY_FD_IDX], &origttysettings ) )
+	if ( isatty( eventdevs[TTY_FD_IDX] ) )
 	{
-		perror("Unable to retrieve TTY attributes");
-		close( eventdevs[TTY_FD_IDX] );
-		eventdevs[TTY_FD_IDX] = -1;
-		return 0;
-	}
-	rawttysettings = origttysettings;
-	cfmakeraw( &rawttysettings );
-	if ( tcsetattr( eventdevs[TTY_FD_IDX], TCSAFLUSH, &rawttysettings ) )
-	{
-		perror("Unable to set TTY to raw mode");
-		tcsetattr( eventdevs[TTY_FD_IDX], TCSAFLUSH, &origttysettings );
-		close( eventdevs[TTY_FD_IDX] );
-		eventdevs[TTY_FD_IDX] = -1;
-		return 0;
+		if ( tcgetattr( eventdevs[TTY_FD_IDX], &origttysettings ) )
+		{
+			if ( ENOTTY == errno )
+				printf("XXX\n");
+			perror("Unable to retrieve TTY attributes");
+			close( eventdevs[TTY_FD_IDX] );
+			eventdevs[TTY_FD_IDX] = -1;
+			return 0;
+		}
+		rawttysettings = origttysettings;
+		cfmakeraw( &rawttysettings );
+		if ( tcsetattr( eventdevs[TTY_FD_IDX], TCSAFLUSH, &rawttysettings ) )
+		{
+			perror("Unable to set TTY to raw mode");
+			tcsetattr( eventdevs[TTY_FD_IDX], TCSAFLUSH, &origttysettings );
+			close( eventdevs[TTY_FD_IDX] );
+			eventdevs[TTY_FD_IDX] = -1;
+			return 0;
+		}
 	}
 	printf("Opened TTY\n");
 	return 1;
@@ -645,7 +664,10 @@ void closetty( void )
 {
 	if ( eventdevs[TTY_FD_IDX] >= 0 )
 	{
-		tcsetattr( eventdevs[TTY_FD_IDX], TCSAFLUSH, &origttysettings );
+		if ( isatty( eventdevs[TTY_FD_IDX] ) )
+		{
+			tcsetattr( eventdevs[TTY_FD_IDX], TCSAFLUSH, &origttysettings );
+		}
 		close(eventdevs[TTY_FD_IDX]);
 	}
 }
@@ -770,11 +792,193 @@ int	list_input_devices ()
 	return	0;
 }
 
+/*
+ * HID is unfortunately very old and stupid. It has, in particular,
+ * no support for UTF-8 (which we could simply forward) but only
+ * supports what basically are the scan-codes of a PS1 keyboard.
+ * Non-ASCII characters are marginally supported the same way they
+ * were in the 1980 - the manufacturer painted different symbols
+ * on some of the keys (e.g., where a US keyboard has the ';'
+ * character the German keyboard features 'ö').
+ *    - translation of scancode to language-specific character has to
+ *      be performed on the destination device (by selecting a different
+ *      keyboard layout there (e.g., on android).
+ *    - only a small set of foreign characters may be 'emulated'.
+ *    - If we (i.g., hidclient) receive a UTF-8 character then we
+ *      have to translate that back to a PS1 scancode (assuming a
+ *      particular layout) and rely on the peer to activate the same
+ *      layout (:-().
+ *
+ */
+
+/*
+UTF-8 of 
+	á: C3, A1,
+	é: C3, A9,
+	í: C3, AD,
+	ó: C3, B3,
+	ú: C3, BA
+	Á: C3, 81,
+	É: C3, 89,
+	Í: C3, 8D,
+	Ó: C3, 93,
+	Ú: C3, 9A
+    ä: C3, A4
+	ö: C3, B6
+	ü: C3, BC
+    Ä: C3, 84
+	Ö: C3, 96
+	Ü: C3, 9C
+	ñ: C3, B1
+	Ñ: C3, 91
+	¡: C2, A1
+	¿: C2, BF
+ */
+
+struct UTF8C3Map {
+	char u;
+	char ps1;
+};
+
+static struct UTF8C3Map utf8c3map [] = {
+	{ 0x81, 0x04 }, /* Á */
+	{ 0x84, 0x14 }, /* Ä */
+	{ 0x89, 0x08 }, /* É */
+	{ 0x8D, 0x0C }, /* Í */
+	{ 0x91, 0x11 }, /* Ñ */
+	{ 0x93, 0x12 }, /* Ó */
+	{ 0x96, 0x13 }, /* Ö */
+	{ 0x9A, 0x18 }, /* Ú */
+	{ 0x9C, 0x1C }, /* Ü */
+};
+
+static struct AsciiMap *findAscii(int ch)
+{
+int i = 0;
+int m;
+int j = sizeof(asciimap)/sizeof(asciimap[0]) - 1;
+
+	while ( i <= j ) {
+		m = (i+j)/2;
+		if ( asciimap[m].ascii > ch )
+			j = m - 1;
+		else if ( asciimap[m].ascii < ch )
+			i = m + 1;
+		else
+			return asciimap + m;
+	}
+	return 0;
+}
+
+static int mapAscii(struct hidrep_keyb_t *keyb, int ch)
+{
+		/* Basic ASCII */
+		int sendkeys = 0;
+		if ( isascii( ch ) )
+		{
+			struct AsciiMap *mapItem;
+
+			if ( isalpha( ch ) )
+			{
+				if ( isupper( ch ) )
+				{
+					keyb->modify |= MOD_L_SHFT;
+				}
+				ch = toupper( ch );
+				keyb->key[sendkeys++] = ch - 'A' + 4;
+			} else if ( isdigit( ch ) ) {
+				if ( '0' == ch ) {
+					ch += 10;
+				}
+				keyb->key[sendkeys++] = ch - '0' + 0x1e;
+			} else if ( (mapItem = findAscii( ch )) )
+			{
+				keyb->key[sendkeys++] = mapItem->ps1;
+				keyb->modify         |= mapItem->mod;
+			}
+		}
+		return sendkeys;
+}
+
+static int mapAnsiEsc(struct hidrep_keyb_t *keyb, unsigned char *buf, int bufsz)
+{
+int sendkeys = 0;
+
+	if ( 3 == bufsz && 0x1b == buf[0] && '[' == buf[1] )
+	{
+		int ps1;
+		switch ( buf[2] )
+		{
+			case 'A': ps1 = 0x52; break; /* UP    */
+			case 'B': ps1 = 0x51; break; /* DOWN  */
+			case 'C': ps1 = 0x4f; break; /* RIGHT */
+			case 'D': ps1 = 0x50; break; /* LEFT  */
+			case 'F': ps1 = 0x4D; break; /* End   */
+			case 'H': ps1 = 0x4A; break; /* HOME  */
+			default:  ps1 = 0x00; break;
+		}
+		if ( ps1 )
+		{
+			keyb->key[sendkeys++] = ps1;
+		}
+	}
+
+	return sendkeys;
+}
+
+/* Map some (very few) UTF8 chars to PS1 'ALT' keys */
+static int mapUTF8(struct hidrep_keyb_t *keyb, unsigned char *buf, int bufsz)
+{
+int sendkeys = 0;
+int i;
+
+	if ( bufsz != 2 )
+	{
+		return 0;
+	}
+	if ( 0xC3 == buf[0] )
+	{
+		char uLow = buf[1] & ~0x20;
+printf("Checking C3 map for 0x%02x\n", uLow);
+		for ( i = 0; i < sizeof(utf8c3map)/sizeof(utf8c3map[0]); i++ ) {
+			if (utf8c3map[i].u == uLow) {
+				keyb->key[sendkeys++] = utf8c3map[i].ps1;
+printf("Mapped UTF8 0xC3 0x%02x -> 0x%02x\n", buf[1], utf8c3map[i].ps1);
+				if ( ! (buf[1] & 0x20) )
+				{
+					keyb->modify |= MOD_L_SHFT;
+				}
+				break;
+			}
+		}
+	}
+	else if ( 0xC2 == buf[0] )
+	{
+		if ( 0xA1 == buf[1]	)
+		{
+		/* ¡ */
+			keyb->key[sendkeys++] = 0x1E;
+		}
+		else if ( 0xBF == buf[1] )
+		{
+		/* ¿ */
+			keyb->key[sendkeys++] = 0x38;
+		}
+	}
+
+	if ( sendkeys )
+	{
+		keyb->modify |= MOD_R_ALT;
+	}
+	return sendkeys;
+}
+
 int parse_tty ( fd_set *efds, int sockdesc )
 {
 struct hidrep_keyb_t keyb;
 int                  j,i,nkeys;
-char                 buf[sizeof(keyb.key)];
+unsigned char        buf[sizeof(keyb.key)];
+int                  sendkeys = 0;
 
 	if ( efds == NULL ) { return -1; }
 
@@ -813,18 +1017,48 @@ char                 buf[sizeof(keyb.key)];
 		return -1;
 	}
 
-	printf("TTY: got chars ");
-	for ( i = 0; i < nkeys; i++ )
+	if ( 1 == nkeys )
 	{
-		printf("0x%02x (%c)", buf[i], isprint(buf[i]) ? buf[i] : '*');
-	}
-	printf("\n");
-
-	if ( sockdesc >= 0 )
-	{
-		for ( i = 0; i < nkeys; i++ ) {
-			keyb.key[i] = buf[i];
+		/* EOF or Ctrl-C */
+		if ( 0x04 == buf[0] || 0x03 == buf[0] )
+		{
+			return -99;
 		}
+		sendkeys += mapAscii( &keyb, buf[0] );
+	}
+    else if ( 2 == nkeys )
+	{
+		int ch = buf[1];
+		if ( 0x1b == buf[0] )
+		{
+			if ( isprint( ch ) )
+			{
+				sendkeys += mapAscii( &keyb, buf[1] );
+				if ( sendkeys )
+				{
+					keyb.modify |= MOD_R_ALT;
+				}
+			}
+		} else {
+			sendkeys += mapUTF8(&keyb, buf, nkeys);
+		}
+	}
+	else if (3 == nkeys)
+	{
+		sendkeys += mapAnsiEsc(&keyb, buf, nkeys);
+	}
+
+	if ( 0x10 & debugevents )
+	{
+		for ( i = 0; i < nkeys; i++ )
+		{
+			printf(" 0x%02x (%c)", (unsigned char)buf[i], isprint(buf[i]) ? buf[i] : '*');
+		}
+		printf("\r\n");
+	}
+
+	if ( sockdesc >= 0 && connectionok && sendkeys > 0 )
+	{
 		j = send ( sockdesc, &keyb, sizeof( keyb ), MSG_NOSIGNAL );
 
 		if ( 1 > j )
@@ -835,6 +1069,7 @@ char                 buf[sizeof(keyb.key)];
 		for ( i = 0; i < nkeys; i++ ) {
 			keyb.key[i] = 0;
 		}
+		keyb.modify = 0;
 		j = send ( sockdesc, &keyb, sizeof( keyb ), MSG_NOSIGNAL );
 
 		if ( 1 > j )
@@ -1194,7 +1429,8 @@ int	parse_events ( fd_set * efds, int sockdesc )
 
 int	main ( int argc, char ** argv )
 {
-	int			i,  j;
+	int         opt;
+	int			j;
 	int			sockint = -1, sockctl = -1; // For the listening sockets
 	struct sockaddr_l2	l2a;
 	socklen_t		alen=sizeof(l2a);
@@ -1213,46 +1449,20 @@ int	main ( int argc, char ** argv )
 	int              usetty = 0; // whether to get input from /dev/tty instead of events
 	int              rval   = 1;
 	// Parse command line
-	for ( i = 1; i < argc; ++i )
-	{
-		if ( ( 0 == strcmp ( argv[i], "-h"     ) ) ||
-		     ( 0 == strcmp ( argv[i], "-?"     ) ) ||
-		     ( 0 == strcmp ( argv[i], "--help" ) ) )
-		{
-			showhelp();
-			return	0;
-		}
-		else if ( ( 0 == strcmp ( argv[i], "-s" ) ) ||
-			  ( 0 == strcmp ( argv[i], "--skipsdp" ) ) )
-		{
-			skipsdp = 1;
-		}
-		else if ( 0 == strncmp ( argv[i], "-e", 2 ) ) {
-			evdevmask |= 1 << atoi(argv[i]+2);
-		}
-		else if ( 0 == strcmp ( argv[i], "-l" ) )
-		{
-			return list_input_devices();
-		}
-		else if ( 0 == strcmp ( argv[i], "-d" ) )
-		{
-			debugevents = 0xffff;
-		}
-		else if ( 0 == strcmp ( argv[i], "-x" ) )
-		{
-			mutex11 = 1;
-		}
-		else if ( 0 == strcmp ( argv[i], "-t" ) )
-		{
-			usetty = 1;
-		}
-		else if ( 0 == strncmp ( argv[i], "-f", 2 ) )
-		{
-			fifoname = argv[i] + 2;
-		}
-		else
-		{
-			fprintf ( stderr, "Invalid argument: \'%s\'\n", argv[i]);
+
+	while ( (opt = getopt(argc, argv, "h?se:ldxtf:")) > 0 ) {
+		switch ( opt ) {
+			case 'h':
+			case '?': showhelp();                              return 0;
+			case 's': skipsdp = 1;                             break;
+			case 'e': evdevmask |= 1 << atoi(optarg);          break;
+			case 'l': return list_input_devices();
+			case 'd': debugevents = 0xffff;                    break;
+			case 'x': mutex11     = 1;                         break;
+			case 't': usetty      = 1;                         break;
+            case 'f': fifoname    = optarg;                    break;
+            default:
+				fprintf ( stderr, "Invalid option: \'-%c\'\n", opt );
 			return	1;
 		}
 	}
