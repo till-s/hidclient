@@ -77,7 +77,8 @@ On my Android device, for example, the symbols `` ` ``, `~` and `^` are
 recognized as dead keys and I can compose e.g., a `â` by typing
 the sequence `^`, `a`. For some reason this does not work with `,` `'`
 and `"` but it does once I combine those latter ones with `Alt_R`.
-Thus, I can generate a `ë` with the sequence `Alt_R-Shift-'`, `e`.
+Thus, I can generate a `ë` with the sequence `Alt_R-Shift-'`, `e`
+(on the US keyboard `Shift-'` produces `"`).
 
 ### TODO
 From the description it follows that all these mappings assume a
