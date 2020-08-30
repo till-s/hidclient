@@ -45,26 +45,29 @@ HID protocol supports is plain old PS1-keyboard scan-codes. I.e., any
 character typed on the computer's keyboard has to be mapped to a PS1 code.
 
 This is bad news for non-ASCII (international) users. Old PCs used to
-be built with the same hardware, supplying the same scan-codes everywhere
-but manufacturers would simply paint different symbols in different countries
-on the keys.
+be built with the same keyboard hardware, supplying the same scan-codes and
+oblivious to language. Manufacturers would simply paint different symbols
+on the keys, depending on the targeted market and the keyboard driver
+software would then have to be configured for the language so that it
+matched the scan-code/label mapping of the keyboard's 'language'.
 
 This means that you have to switch the keyboard layout on the target
 device (e.g., tell the phone that you are using a German BT-keyboard).
-Then, when the target device receives the PS1 scan-code for ';' it
-interprets that as a 'ö' -- since that's what a German keyboard features
-at the physical location where the US keyboard has a ';'.
+Then, when the target device receives the PS1 scan-code for the key
+that is labeled ';' on a US keyboard it interprets that as a 'ö' --
+since that's what a German keyboard features at that particular
+physical location.
 
 In order to provide at least minimal support for international characters
 I have added mappings for the few characters that can be encoded with
-the ALT modifier on PS1:
+the ALT modifier on a (US-) PS1 keyboard:
 
 á,é,í¸ó,ú,ä,ö,ü,ñ and their upper-case variants. If the terminal sends
 UTF-8 sequences for these characters then `hidclient` will map then to
 the corresponding ALT-PS1 characters.
 
 In a similar fashion basic ANSI escape sequences that are used by
-the termial (mostly for cursor movement) are mapped to the PS1 UP, DOWN,
+the terminal (mostly for cursor movement) are mapped to the PS1 UP, DOWN,
 LEFT, RIGHT, HOME, END etc. keys.
 
 ### Use of Dead Key
@@ -75,6 +78,12 @@ recognized as dead keys and I can compose e.g., a `â` by typing
 the sequence ^, a. For some reason this does not work with , ' "
 but it does once I combine those latter ones with Alt_R.
 Thus, I can generate a 'ë' with the sequence Alt_R-Shift-', e.
+
+### TODO
+From the description it follows that all these mappings assume a
+(international) US keyboard layout (on the target device). If you
+want to avoid switching the target device's language then `hidclient`
+would have to be modified to support different/multiple mappings.
 
 # Original README
 
