@@ -73,7 +73,7 @@ LEFT, RIGHT, HOME, END etc. keys.
 ### Use of Dead Key
 If the target keyboard is set to 'International' then it should
 recognize `dead` keys which allow you to type accented characters.
-On my Android device, for example, the symbols `, ~ and ^ are
+On my Android device, for example, the symbols ```, ~ and ^ are
 recognized as dead keys and I can compose e.g., a `â` by typing
 the sequence ^, a. For some reason this does not work with , ' "
 but it does once I combine those latter ones with Alt_R.
