@@ -523,6 +523,9 @@ struct termios rawttysettings;
 		}
 		rawttysettings = origttysettings;
 		cfmakeraw( &rawttysettings );
+		/* Still allow output processing (nicer printf output) */
+		rawttysettings.c_oflag |= OPOST;
+
 		if ( tcsetattr( eventdevs[TTY_FD_IDX], TCSAFLUSH, &rawttysettings ) )
 		{
 			perror("Unable to set TTY to raw mode");
