@@ -1441,7 +1441,7 @@ int	main ( int argc, char ** argv )
 	fd_set			fds;		  // fds for listening sockets
 	fd_set			efds;	          // dev-event file descriptors
 	int			maxevdevfileno;
-	char			skipsdp = 0;	  // On request, disable SDPreg
+	char			skipsdp = 1;	  // On request, disable SDPreg
 	struct timeval		tv;		  // Used for "select"
 	int			evdevmask = 0;// If restricted to using only one evdev
 	int			mutex11 = 0;      // try to "mute" in x11?
@@ -1457,11 +1457,12 @@ int	main ( int argc, char ** argv )
 		x11handles[j] = -1;
 	}
 
-	while ( (opt = getopt(argc, argv, "h?se:ldxtf:")) > 0 ) {
+	while ( (opt = getopt(argc, argv, "h?se:ldxtf:r")) > 0 ) {
 		switch ( opt ) {
 			case 'h':
 			case '?': drop0(); showhelp();                     return 0;
 			case 's': skipsdp = 1;                             break;
+			case 'r': skipsdp = 0;                             break;
 			case 'e': evdevmask |= 1 << atoi(optarg);          break;
 			case 'l': drop0(); return list_input_devices();
 			case 'd': debugevents = 0xffff;                    break;
@@ -1754,7 +1755,8 @@ void	showhelp ( void )
 "-x		Disable device in X11 while hidclient is running\n" \
 "-s|--skipsdp	Skip SDP registration\n" \
 "		Do not register with the Service Discovery Infrastructure\n" \
-"		(for debug purposes)\n\n" \
+"		(for debug purposes -- THIS IS NOW THE DEFAULT; SDP broken on recent distros)\n" \
+"-r		Enable SDP registration\n\n" \
 "Using hidclient in conjunction with \'openvt\' is recommended to minize\n" \
 "impact of keystrokes meant to be transmitted to the local user interface\n" \
 "(like running hidclient from a xterm window). You can make \'openvt\'\n" \
