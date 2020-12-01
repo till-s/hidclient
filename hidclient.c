@@ -1418,10 +1418,13 @@ int	parse_events ( fd_set * efds, int sockdesc )
 static void
 drop0()
 {
-	if ( setuid( getuid() && 0 == geteuid() ) )
+	if ( 0 == geteuid() )
 	{
-		perror("Unable to drop root priviles");
-		exit(1);
+		if ( setuid( getuid() ) )
+		{
+			perror("Unable to drop root priviles");
+			exit(1);
+		}
 	}
 }
 
