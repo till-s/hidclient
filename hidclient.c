@@ -1753,6 +1753,7 @@ void	showhelp ( void )
 "-f<name>	Use fifo <name> instead of event input devices\n" \
 "-l		List available input devices\n" \
 "-x		Disable device in X11 while hidclient is running\n" \
+"-t		Read input from local TTY instead of X input queue\n" \
 "-s|--skipsdp	Skip SDP registration\n" \
 "		Do not register with the Service Discovery Infrastructure\n" \
 "		(for debug purposes -- THIS IS NOW THE DEFAULT; SDP broken on recent distros)\n" \
@@ -1766,7 +1767,8 @@ void	showhelp ( void )
 "This will even return to your xsession after hidclient terminates.\n\n" \
 "hidclient connections can be dropped at any time by pressing the PAUSE\n" \
 "key; the program will wait for other connections afterward.\n" \
-"To stop hidclient, press LeftCtrl+LeftAlt+Pause.\n"
+"To stop hidclient, press LeftCtrl+LeftAlt+Pause.\n\n" \
+"Alternatively, just open a text console and use hidclient -t.\n\n"
 		);
 	return;
 }
