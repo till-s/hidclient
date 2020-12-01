@@ -103,7 +103,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <termios.h>
-#include <stropts.h>
 #include <ctype.h>
 #include <sys/stat.h>
 #include <sys/time.h>
