@@ -1564,6 +1564,12 @@ int	main ( int argc, char ** argv )
 	signal ( SIGINT,  &onsignal );
 	fprintf ( stdout, "The HID-Client is now ready to accept connections "
 			"from another machine\n" );
+	if ( skipsdp )
+	{
+		fprintf ( stdout, "It may be necessary to disable and re-enable the "
+		          "bluetooth stack at\n" );
+		fprintf ( stdout, "this point (e.g., from Ubuntu GUI widget).\n" );
+	}
 	//i = system ( "stty -echo" );	// Disable key echo to the console
 	while ( 0 == prepareshutdown )
 	{	// Wait for any shutdown-event to occur
